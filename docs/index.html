@@ -3,178 +3,258 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JSON File Editor</title>
+    <title>GitHub JSON Viewer</title>
+    <!-- CodeMirror CSS for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.7/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.7/theme/monokai.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
             margin: 20px;
+            background-color: #f0f0f0;
         }
-        #fileList {
-            margin-bottom: 20px;
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            gap: 20px;
         }
-        #fileList ul {
+        .file-list {
+            width: 30%;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .file-list ul {
             list-style: none;
             padding: 0;
         }
-        #fileList li {
+        .file-list li {
+            padding: 10px;
             cursor: pointer;
-            padding: 5px;
-            margin: 5px 0;
-            background-color: #f0f0f0;
+            border-bottom: 1px solid #ddd;
         }
-        #fileList li:hover {
+        .file-list li:hover {
+            background-color: #f5f5f5;
+        }
+        .file-list li.selected {
             background-color: #e0e0e0;
+            font-weight: bold;
         }
-        #editor {
-            width: 100%;
-            height: 400px;
-            border: 1px solid #ccc;
+        .editor-container {
+            width: 70%;
         }
-        #saveButton {
-            margin-top: 10px;
-            padding: 10px 20px;
+        .editor-header {
+            margin-bottom: 10px;
+        }
+        #jsonEditor {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 8px 15px;
             background-color: #007bff;
             color: white;
             border: none;
+            border-radius: 5px;
             cursor: pointer;
+            margin-right: 10px;
         }
-        #saveButton:hover {
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
             background-color: #0056b3;
         }
-        #message {
-            margin-top: 10px;
-            color: green;
-        }
-        #error {
-            margin-top: 10px;
+        .error {
             color: red;
+            margin-top: 10px;
+        }
+        .success {
+            color: green;
+            margin-top: 10px;
         }
     </style>
 </head>
 <body>
-    <h1>JSON File Editor</h1>
-    <div id="fileList">
-        <h2>JSON Files in Repository</h2>
-        <ul id="fileItems"></ul>
-    </div>
-    <div id="editorContainer">
-        <h2>Edit JSON</h2>
-        <textarea id="editor"></textarea>
-        <button id="saveButton">Save Changes</button>
-        <div id="message"></div>
-        <div id="error"></div>
+    <div class="container">
+        <div class="file-list">
+            <h3>JSON Files</h3>
+            <ul id="fileList"></ul>
+        </div>
+        <div class="editor-container">
+            <div class="editor-header">
+                <button id="formatButton" disabled>Format JSON</button>
+                <button id="copyButton" disabled>Copy JSON</button>
+                <span id="currentFile"></span>
+            </div>
+            <textarea id="jsonEditor"></textarea>
+            <div id="errorMessage" class="error"></div>
+        </div>
     </div>
 
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.7/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.7/mode/javascript/javascript.min.js"></script>
+    <!-- JSONLint for validation and formatting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsonlint/1.6.0/jsonlint.min.js"></script>
     <script>
-        const repoOwner = 'yblebon'; // Replace with your GitHub username
-        const repoName = 'datasources'; // Replace with your repository name
-        const folderPath = '/'; // Replace with the folder path in your repo where JSON files are stored
-        const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${folderPath}`;
+        // Initialize CodeMirror
+        const editor = CodeMirror.fromTextArea(document.getElementById('jsonEditor'), {
+            lineNumbers: true,
+            mode: 'application/json',
+            theme: 'monokai',
+            readOnly: false
+        });
 
-        // Fetch JSON files from GitHub repository
+        const fileList = document.getElementById('fileList');
+        const formatButton = document.getElementById('formatButton');
+        const copyButton = document.getElementById('copyButton');
+        const currentFile = document.getElementById('currentFile');
+        const errorMessage = document.getElementById('errorMessage');
+
+        // GitHub repository details (replace with your repo)
+        const repoOwner = 'yblebon'; // Replace with GitHub username
+        const repoName = 'datasources'; // Replace with repository name
+        const path = '/'; // Optional: specific folder path in repo
+        const githubApiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${path}`;
+
+        // Fetch JSON files from GitHub
         async function fetchJsonFiles() {
             try {
-                const response = await fetch(apiUrl, {
+                const response = await fetch(githubApiUrl, {
                     headers: {
                         'Accept': 'application/vnd.github.v3+json'
                     }
                 });
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch files: ${response.status}`);
-                }
+                if (!response.ok) throw new Error('Failed to fetch repository contents');
                 const files = await response.json();
+                fileList.innerHTML = '';
                 const jsonFiles = files.filter(file => file.name.endsWith('.json'));
-                displayFileList(jsonFiles);
-            } catch (error) {
-                document.getElementById('error').textContent = `Error fetching files: ${error.message}`;
-            }
-        }
-
-        // Display list of JSON files
-        function displayFileList(files) {
-            const fileList = document.getElementById('fileItems');
-            fileList.innerHTML = '';
-            files.forEach(file => {
-                const li = document.createElement('li');
-                li.textContent = file.name;
-                li.dataset.url = file.download_url;
-                li.dataset.sha = file.sha; // Store SHA for potential updates
-                li.addEventListener('click', () => loadJsonFile(file.download_url, file.name));
-                fileList.appendChild(li);
-            });
-        }
-
-        // Load and display selected JSON file
-        async function loadJsonFile(url, fileName) {
-            try {
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch file: ${response.status}`);
+                if (jsonFiles.length === 0) {
+                    fileList.innerHTML = '<li>No JSON files found</li>';
+                    return;
                 }
-                const jsonContent = await response.text();
-                const editor = document.getElementById('editor');
-                editor.value = jsonContent;
-                document.getElementById('message').textContent = `Loaded ${fileName}`;
-                document.getElementById('error').textContent = '';
-                // Store current file info
-                editor.dataset.fileUrl = url;
-                editor.dataset.fileName = fileName;
+                jsonFiles.forEach(file => {
+                    const li = document.createElement('li');
+                    li.textContent = file.name;
+                    li.dataset.url = file.download_url;
+                    li.addEventListener('click', () => loadJsonFile(file));
+                    fileList.appendChild(li);
+                });
             } catch (error) {
-                document.getElementById('error').textContent = `Error loading file: ${error.message}`;
+                fileList.innerHTML = `<li>Error: ${error.message}</li>`;
             }
         }
 
-        // Placeholder for saving changes (requires authentication)
-        async function saveJsonFile() {
-            const editor = document.getElementById('editor');
-            const content = editor.value;
-            const fileName = editor.dataset.fileName;
-            const sha = document.querySelector(`#fileItems li[data-url="${editor.dataset.fileUrl}"]`).dataset.sha;
+        // Load and display JSON file content
+        async function loadJsonFile(file) {
+            // Update selected file styling
+            document.querySelectorAll('.file-list li').forEach(li => li.classList.remove('selected'));
+            event.target.classList.add('selected');
+            currentFile.textContent = `Editing: ${file.name}`;
 
-            // Validate JSON
             try {
-                JSON.parse(content); // Ensure valid JSON
+                const response = await fetch(file.download_url);
+                if (!response.ok) throw new Error('Failed to fetch JSON file');
+                const jsonText = await response.text();
+                editor.setValue(jsonText || ''); // Ensure empty string if no content
+                errorMessage.textContent = '';
+                formatButton.disabled = !jsonText; // Disable if empty
+                copyButton.disabled = !jsonText; // Disable if empty
+                if (jsonText) validateJson(jsonText);
             } catch (error) {
-                document.getElementById('error').textContent = `Invalid JSON: ${error.message}`;
+                errorMessage.textContent = `Error loading file: ${error.message}`;
+                editor.setValue('');
+                formatButton.disabled = true;
+                copyButton.disabled = true;
+            }
+        }
+
+        // Validate JSON
+        function validateJson(jsonText) {
+            try {
+                jsonlint.parse(jsonText);
+                errorMessage.textContent = '';
+                return true;
+            } catch (error) {
+                errorMessage.textContent = `Invalid JSON: ${error.message}`;
+                return false;
+            }
+        }
+
+        // Format JSON
+        formatButton.addEventListener('click', () => {
+            const jsonText = editor.getValue();
+            if (!jsonText) {
+                errorMessage.textContent = 'No content to format';
                 return;
             }
-
-            // Note: Saving requires a GitHub Personal Access Token and API call
-            // This is a placeholder as static pages can't securely handle authentication
-            document.getElementById('error').textContent = 'Saving not implemented. Use GitHub API with authentication to update files.';
-            document.getElementById('message').textContent = '';
-
-            // Example API call (commented out, requires backend or token):
-            /*
-            const token = 'YOUR_GITHUB_PERSONAL_ACCESS_TOKEN';
-            const saveUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${folderPath}/${fileName}`;
-            try {
-                const response = await fetch(saveUrl, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `token ${token}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    },
-                    body: JSON.stringify({
-                        message: `Update ${fileName}`,
-                        content: btoa(content), // Base64 encode
-                        sha: sha
-                    })
-                });
-                if (response.ok) {
-                    document.getElementById('message').textContent = `Saved ${fileName}`;
-                    document.getElementById('error').textContent = '';
-                } else {
-                    throw new Error(`Failed to save: ${response.status}`);
+            if (validateJson(jsonText)) {
+                try {
+                    const parsed = JSON.parse(jsonText);
+                    const formatted = JSON.stringify(parsed, null, 2);
+                    editor.setValue(formatted);
+                    errorMessage.textContent = 'JSON formatted successfully';
+                    errorMessage.className = 'success';
+                    setTimeout(() => {
+                        if (errorMessage.textContent === 'JSON formatted successfully') {
+                            errorMessage.textContent = '';
+                            errorMessage.className = 'error';
+                        }
+                    }, 2000);
+                } catch (error) {
+                    errorMessage.textContent = `Formatting error: ${error.message}`;
                 }
-            } catch (error) {
-                document.getElementById('error').textContent = `Error saving file: ${error.message}`;
             }
-            */
+        });
+
+        // Copy JSON to clipboard
+        copyButton.addEventListener('click', () => {
+            const jsonText = editor.getValue();
+            if (!jsonText) {
+                errorMessage.textContent = 'No content to copy';
+                return;
+            }
+            try {
+                // Ensure jsonText is a string
+                const textToCopy = typeof jsonText === 'string' ? jsonText : '';
+                if (!navigator.clipboard) {
+                    // Fallback for non-secure contexts or unsupported browsers
+                    const textarea = document.createElement('textarea');
+                    textarea.value = textToCopy;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    notifyCopySuccess();
+                } else {
+                    navigator.clipboard.write(textToCopy).then(() => {
+                        notifyCopySuccess();
+                    }).catch(err => {
+                        errorMessage.textContent = `Failed to copy: ${err.message}`;
+                    });
+                }
+            } catch (err) {
+                errorMessage.textContent = `Failed to copy: ${err.message}`;
+            }
+        });
+
+        // Helper function for successful copy notification
+        function notifyCopySuccess() {
+            errorMessage.textContent = 'JSON copied to clipboard';
+            errorMessage.className = 'success';
+            setTimeout(() => {
+                if (errorMessage.textContent === 'JSON copied to clipboard') {
+                    errorMessage.textContent = '';
+                    errorMessage.className = 'error';
+                }
+            }, 2000);
         }
 
         // Initialize
-        document.getElementById('saveButton').addEventListener('click', saveJsonFile);
         fetchJsonFiles();
     </script>
 </body>
